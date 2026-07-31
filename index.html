@@ -1,0 +1,1564 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM VRAM Calculator - estimate GPU memory for a local model, with honest error bars</title>
+<meta name="description" content="Estimate the VRAM a local LLM needs. Weights, KV cache with grouped-query attention, activation and runtime overhead, shown as a range with the arithmetic visible, plus a fits-or-not verdict for common GPUs.">
+<link rel="canonical" href="https://0xelitesystem.github.io/llm-vram-calculator/">
+<meta property="og:title" content="LLM VRAM Calculator">
+<meta property="og:description" content="Estimate the VRAM a local LLM needs. Weights, KV cache, overhead, shown as a range with the arithmetic visible, plus a fits-or-not verdict for common GPUs.">
+<meta property="og:url" content="https://0xelitesystem.github.io/llm-vram-calculator/">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='18' fill='%230f5c60'/><text x='50' y='70' font-size='52' text-anchor='middle' fill='%23e6c07b' font-family='monospace'>GB</text></svg>">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "LLM VRAM Calculator",
+  "description": "Estimate the VRAM a local LLM needs: weights, KV cache with grouped-query attention, activation and runtime overhead, presented as a range with the arithmetic visible.",
+  "url": "https://0xelitesystem.github.io/llm-vram-calculator/",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Any",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  }
+}
+</script>
+<style>
+:root {
+  --bg: #0b1a1b;
+  --surface: #12292a;
+  --surface-2: #0f2223;
+  --ink: #e9ece8;
+  --ink-soft: #aebfbc;
+  --ink-faint: #7f9694;
+  --rule: #26403f;
+  --teal: #4fb8bd;
+  --teal-deep: #7fd2d6;
+  --gold: #d7a659;
+  --ok: #63cf7c;
+  --ok-bg: #123020;
+  --warn: #d7a659;
+  --warn-bg: #2e2410;
+  --err: #eb8181;
+  --err-bg: #331818;
+  --code-bg: #08191a;
+  --shadow: 0 1px 0 rgba(255,255,255,0.03), 0 6px 20px rgba(0,0,0,0.35);
+}
+html[data-theme="light"] {
+  --bg: #faf9f4;
+  --surface: #ffffff;
+  --surface-2: #f2efe6;
+  --ink: #0a1d1e;
+  --ink-soft: #2c4a4c;
+  --ink-faint: #5d7375;
+  --rule: #cfd9d8;
+  --teal: #0f5c60;
+  --teal-deep: #0a4548;
+  --gold: #8a611f;
+  --ok: #1a6b36;
+  --ok-bg: #e4f4e8;
+  --warn: #855800;
+  --warn-bg: #fbf1da;
+  --err: #97201f;
+  --err-bg: #fbe6e5;
+  --code-bg: #f1ede3;
+  --shadow: 0 1px 2px rgba(10,29,30,0.06), 0 6px 18px rgba(10,29,30,0.07);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.55;
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+}
+code, pre, .mono, .num { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+a { color: var(--teal); }
+a:hover { color: var(--teal-deep); }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
+header.top {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start;
+  justify-content: space-between; padding-bottom: 16px; margin-bottom: 20px;
+  border-bottom: 1px solid var(--rule);
+}
+h1 { font-size: 1.5rem; line-height: 1.25; letter-spacing: -0.01em; }
+h1 .accent { color: var(--teal); }
+.tagline { color: var(--ink-soft); font-size: 0.94rem; margin-top: 4px; max-width: 60ch; }
+h2 { font-size: 1.02rem; margin: 0 0 10px; letter-spacing: 0.01em; }
+h3 { font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint); margin: 18px 0 8px; }
+.layout { display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 20px; align-items: start; }
+.panel {
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 12px;
+  padding: 16px; box-shadow: var(--shadow);
+}
+.panel + .panel { margin-top: 16px; }
+fieldset { border: 0; }
+legend {
+  font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--ink-faint); margin: 16px 0 8px; font-weight: 600;
+}
+fieldset:first-of-type legend { margin-top: 0; }
+label { display: block; font-size: 0.86rem; color: var(--ink-soft); margin-bottom: 4px; }
+input[type="number"], input[type="text"], select {
+  width: 100%; padding: 8px 10px; font-size: 0.95rem;
+  background: var(--surface-2); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 7px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+select { font-family: inherit; }
+input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible {
+  outline: 2px solid var(--teal); outline-offset: 2px;
+}
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.grid4 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.field { margin-bottom: 10px; }
+.hint { font-size: 0.78rem; color: var(--ink-faint); margin-top: 4px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chip {
+  font-size: 0.78rem; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--rule); background: var(--surface-2); color: var(--ink-soft);
+  cursor: pointer; font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+.chip:hover { border-color: var(--teal); color: var(--teal); }
+button {
+  font: inherit; cursor: pointer; border-radius: 8px;
+  border: 1px solid var(--rule); background: var(--surface-2); color: var(--ink);
+  padding: 8px 12px;
+}
+button:hover { border-color: var(--teal); }
+button.primary { background: var(--teal); border-color: var(--teal); color: #04191a; font-weight: 600; }
+html[data-theme="light"] button.primary { color: #ffffff; }
+button.primary:hover { filter: brightness(1.08); }
+.btnrow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.theme-btn { white-space: nowrap; }
+.note {
+  background: var(--surface-2); border: 1px solid var(--rule); border-left: 3px solid var(--gold);
+  border-radius: 6px; padding: 8px 10px; font-size: 0.82rem; color: var(--ink-soft); margin-top: 8px;
+}
+.empty {
+  text-align: center; padding: 36px 18px; color: var(--ink-soft);
+}
+.empty .big { font-size: 1.05rem; color: var(--ink); margin-bottom: 8px; }
+.verdict { border-radius: 10px; padding: 14px; border: 1px solid var(--rule); }
+.verdict.fits { background: var(--ok-bg); border-color: var(--ok); }
+.verdict.tight { background: var(--warn-bg); border-color: var(--warn); }
+.verdict.no { background: var(--err-bg); border-color: var(--err); }
+.verdict .headline { font-size: 1.12rem; font-weight: 600; }
+.verdict.fits .headline { color: var(--ok); }
+.verdict.tight .headline { color: var(--warn); }
+.verdict.no .headline { color: var(--err); }
+.verdict .sub { font-size: 0.88rem; color: var(--ink-soft); margin-top: 4px; }
+.range-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-top: 10px; }
+.range-num { font-size: 1.7rem; font-weight: 700; letter-spacing: -0.02em; }
+.range-unit { color: var(--ink-faint); font-size: 0.9rem; }
+table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-faint); font-weight: 600; }
+td.num, th.num { text-align: right; font-family: ui-monospace, Menlo, Consolas, monospace; white-space: nowrap; }
+tr.total td { font-weight: 700; border-top: 2px solid var(--rule); }
+.deriv {
+  display: block; font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.76rem; color: var(--ink-faint); background: var(--code-bg);
+  padding: 5px 7px; border-radius: 5px; margin-top: 5px; overflow-x: auto; white-space: pre-wrap;
+  word-break: break-word;
+}
+.tag {
+  display: inline-block; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 1px 6px; border-radius: 4px; border: 1px solid var(--rule); color: var(--ink-faint);
+  margin-left: 6px; vertical-align: middle;
+}
+.tag.exact { color: var(--ok); border-color: var(--ok); }
+.tag.est { color: var(--warn); border-color: var(--warn); }
+.scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.pill { font-size: 0.74rem; padding: 2px 7px; border-radius: 999px; font-weight: 600; white-space: nowrap; }
+.pill.fits { background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok); }
+.pill.tight { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn); }
+.pill.no { background: var(--err-bg); color: var(--err); border: 1px solid var(--err); }
+ul.fixes { list-style: none; }
+ul.fixes li { padding: 7px 0; border-bottom: 1px solid var(--rule); font-size: 0.88rem; }
+ul.fixes li:last-child { border-bottom: 0; }
+ul.fixes b { color: var(--ink); }
+ul.plain { margin-left: 18px; font-size: 0.86rem; color: var(--ink-soft); }
+ul.plain li { margin: 5px 0; }
+pre.summary {
+  background: var(--code-bg); border: 1px solid var(--rule); border-radius: 8px;
+  padding: 12px; font-size: 0.78rem; overflow-x: auto; white-space: pre; color: var(--ink-soft);
+  max-height: 420px; overflow-y: auto;
+}
+details { border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; background: var(--surface-2); margin-top: 10px; }
+details + details { margin-top: 8px; }
+summary { cursor: pointer; font-weight: 600; font-size: 0.9rem; }
+details p, details ul { margin-top: 8px; font-size: 0.86rem; color: var(--ink-soft); }
+.errbox {
+  background: var(--err-bg); border: 1px solid var(--err); color: var(--err);
+  border-radius: 8px; padding: 10px 12px; font-size: 0.88rem; margin-bottom: 12px;
+}
+.errbox ul { margin-left: 18px; }
+.warnbox {
+  background: var(--warn-bg); border: 1px solid var(--warn); color: var(--ink-soft);
+  border-radius: 8px; padding: 10px 12px; font-size: 0.84rem; margin-bottom: 12px;
+}
+.warnbox ul { margin-left: 18px; }
+footer.bottom {
+  margin-top: 34px; padding-top: 16px; border-top: 1px solid var(--rule);
+  font-size: 0.86rem; color: var(--ink-faint);
+  display: flex; flex-wrap: wrap; gap: 6px 16px;
+}
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+}
+@media (max-width: 400px) {
+  .wrap { padding: 14px 10px 44px; }
+  .grid2, .grid4 { grid-template-columns: 1fr; }
+  .range-num { font-size: 1.4rem; }
+  h1 { font-size: 1.25rem; }
+}
+</style>
+</head>
+<body>
+<script>
+/* Theme restore. Runs at page load, before first paint, not only on click. */
+(function () {
+  try {
+    var saved = window.localStorage.getItem('llm-vram-theme');
+    if (saved === 'light' || saved === 'dark') {
+      document.documentElement.setAttribute('data-theme', saved);
+    }
+  } catch (e) { /* storage blocked, keep the dark default */ }
+})();
+</script>
+
+<div class="wrap">
+<header class="top">
+  <div>
+    <h1>LLM <span class="accent">VRAM</span> Calculator</h1>
+    <p class="tagline">Work out how much GPU memory a local model actually needs. Weights and KV cache are arithmetic; overhead is an estimate, and this page tells you which is which.</p>
+  </div>
+  <button id="themeBtn" class="theme-btn" type="button" aria-pressed="false">Light mode</button>
+</header>
+
+<div class="layout">
+
+  <!-- ============ INPUTS ============ -->
+  <form class="panel" id="form" autocomplete="off">
+    <h2>Inputs</h2>
+
+    <fieldset>
+      <legend>Model</legend>
+
+      <div class="field">
+        <label for="preset">Model preset (fills every field below)</label>
+        <select id="preset">
+          <option value="">Custom / none</option>
+        </select>
+        <div class="hint" id="presetNote">Presets fill parameter count and architecture. Every field stays editable.</div>
+      </div>
+
+      <div class="field">
+        <label for="params">Parameter count (billions)</label>
+        <input type="number" id="params" min="0" step="0.01" inputmode="decimal" placeholder="8.03">
+        <div class="chips" id="sizeChips"></div>
+        <div class="hint">Total parameters, not active parameters. For a mixture-of-experts model every expert still has to sit in memory.</div>
+      </div>
+
+      <div class="field">
+        <label for="quant">Weight quantization</label>
+        <select id="quant"></select>
+      </div>
+
+      <div class="field">
+        <label for="bpw">Bits per weight (editable)</label>
+        <input type="number" id="bpw" min="0.5" max="32" step="0.01" inputmode="decimal">
+        <div class="hint" id="bpwNote"></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Serving</legend>
+
+      <div class="grid2">
+        <div class="field">
+          <label for="ctx">Context length (tokens)</label>
+          <input type="number" id="ctx" min="1" step="1" inputmode="numeric" placeholder="8192">
+        </div>
+        <div class="field">
+          <label for="batch">Batch / concurrent sequences</label>
+          <input type="number" id="batch" min="1" step="1" inputmode="numeric" placeholder="1">
+        </div>
+      </div>
+      <div class="chips" id="ctxChips"></div>
+
+      <div class="field" style="margin-top:10px">
+        <label for="kvquant">KV cache precision</label>
+        <select id="kvquant"></select>
+      </div>
+      <div class="field">
+        <label for="kvbits">KV bits per element (editable)</label>
+        <input type="number" id="kvbits" min="2" max="32" step="0.5" inputmode="decimal">
+        <div class="hint">Quantizing the cache is a real lever. In llama.cpp it is <code>-ctk</code> and <code>-ctv</code>; a quantized V cache requires flash attention, and llama.cpp refuses to start without it. Quality cost is small at 8 bits and gets real below that.</div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Architecture (this is what the KV cache depends on)</legend>
+      <div class="grid4">
+        <div class="field">
+          <label for="layers">Layers</label>
+          <input type="number" id="layers" min="1" step="1" inputmode="numeric" placeholder="32">
+        </div>
+        <div class="field">
+          <label for="heads">Attention heads</label>
+          <input type="number" id="heads" min="1" step="1" inputmode="numeric" placeholder="32">
+        </div>
+        <div class="field">
+          <label for="kvheads">Key / value heads</label>
+          <input type="number" id="kvheads" min="1" step="1" inputmode="numeric" placeholder="8">
+        </div>
+        <div class="field">
+          <label for="headdim">Head dimension</label>
+          <input type="number" id="headdim" min="1" step="1" inputmode="numeric" placeholder="128">
+        </div>
+      </div>
+      <div class="hint">From the model's <code>config.json</code>: <code>num_hidden_layers</code>, <code>num_attention_heads</code>, <code>num_key_value_heads</code>, <code>head_dim</code> (or <code>hidden_size / num_attention_heads</code> when head_dim is absent). Key/value heads below attention heads means grouped-query attention, and it is the single biggest factor in KV cache size.</div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Overhead assumptions (estimates you can change)</legend>
+      <div class="grid2">
+        <div class="field">
+          <label for="actLow">Activation + workspace, low (%)</label>
+          <input type="number" id="actLow" min="0" max="100" step="0.5" inputmode="decimal">
+        </div>
+        <div class="field">
+          <label for="actHigh">Activation + workspace, high (%)</label>
+          <input type="number" id="actHigh" min="0" max="200" step="0.5" inputmode="decimal">
+        </div>
+        <div class="field">
+          <label for="rtLow">Runtime / CUDA context, low (GiB)</label>
+          <input type="number" id="rtLow" min="0" max="16" step="0.05" inputmode="decimal">
+        </div>
+        <div class="field">
+          <label for="rtHigh">Runtime / CUDA context, high (GiB)</label>
+          <input type="number" id="rtHigh" min="0" max="16" step="0.05" inputmode="decimal">
+        </div>
+      </div>
+      <div class="note">These two are the guessed part of the estimate. The percentages are a rule of thumb applied to weights plus KV, not a measurement, and they are the reason the result is a range instead of a number.</div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Your GPU</legend>
+      <div class="field">
+        <label for="gpu">Pick a card (fills the field below)</label>
+        <select id="gpu"></select>
+      </div>
+      <div class="grid2">
+        <div class="field">
+          <label for="myvram">My VRAM (GiB)</label>
+          <input type="number" id="myvram" min="0" step="0.5" inputmode="decimal" placeholder="12">
+        </div>
+        <div class="field">
+          <label for="reserved">Reserved for display / driver (GiB)</label>
+          <input type="number" id="reserved" min="0" max="16" step="0.1" inputmode="decimal">
+        </div>
+      </div>
+      <div class="hint" id="gpuNote">Everything on this page is in GiB (1024 cubed bytes), which is what <code>nvidia-smi</code> reports. A GeForce card advertised as 24 GB reports 24576 MiB, so the number carries straight over. Datacenter parts quoted in decimal GB, like the H200 at 141 GB, report a little less than that in GiB, so read <code>nvidia-smi</code> and type the real figure in.</div>
+    </fieldset>
+
+    <div class="btnrow">
+      <button type="button" class="primary" id="sampleBtn">Load sample</button>
+      <button type="button" id="resetBtn">Reset</button>
+    </div>
+  </form>
+
+  <!-- ============ RESULTS ============ -->
+  <div>
+    <div class="panel" id="resultsPanel">
+      <h2>Estimate</h2>
+      <div id="results">
+        <div class="empty">
+          <div class="big">Nothing to calculate yet.</div>
+          <p>Pick a model preset, or press <b>Load sample</b> to see an 8B model at 64k context on a 12 GiB card: it does not fit, and the page shows exactly what to change.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="summaryPanel" hidden>
+      <h2>Copyable summary</h2>
+      <div class="btnrow" style="margin-top:0;margin-bottom:10px">
+        <button type="button" id="copyBtn">Copy summary</button>
+      </div>
+      <pre class="summary" id="summaryOut"></pre>
+    </div>
+
+    <div class="panel">
+      <h2>How much of this is real arithmetic</h2>
+      <p style="font-size:0.9rem;color:var(--ink-soft)">Read this before you trust a number off this page.</p>
+
+      <details open>
+        <summary>Near-exact: weights and KV cache</summary>
+        <p>Both follow directly from numbers you supplied. Weights are parameters times bits per weight. KV cache is 2 (one key, one value) x layers x key/value heads x head dimension x context x batch x bytes per element. If your parameter count, bits per weight and architecture fields are right, these two are right to within a rounding error.</p>
+        <p>The caveats that remain: whole-file bits per weight for the mixed GGUF classes (anything ending in _K_M or _K_S) is an average, and the exact value moves a few percent between models. Bits per weight is exact for FP16, FP8, INT8, Q8_0 and Q4_0, where the block layout fixes it.</p>
+      </details>
+
+      <details>
+        <summary>Estimated: activation, workspace, runtime overhead</summary>
+        <p>This is a rule of thumb, not a measurement, and this page never presents it as one. What actually lands in that bucket: attention and MLP scratch buffers, the logits buffer, CUDA graph memory, the allocator's fragmentation, and the CUDA context itself, which costs a few hundred MB per process before a single weight is loaded. It scales with how many tokens are processed at once far more than with context length.</p>
+        <p>That is why the result is a range. If you need a real number, load the model and read <code>nvidia-smi</code>.</p>
+      </details>
+
+      <details>
+        <summary>Your inference engine changes the answer</summary>
+        <ul class="plain">
+          <li><b>llama.cpp / ollama:</b> allocates the KV cache for the context you ask for, up front. Supports quantized K and V caches and partial GPU offload by layer.</li>
+          <li><b>vLLM:</b> preallocates a paged KV pool sized by <code>gpu_memory_utilization</code>, which currently defaults to 0.92, so it will look like it is using nearly the whole card no matter how small your model is. Check the default for your version, it has moved. Paged attention removes most of the waste from padding sequences to the max length.</li>
+          <li><b>transformers:</b> the least memory-frugal path. Cache is FP16 by default and there is no paging.</li>
+          <li><b>ExLlamaV2 and similar:</b> offer quantized cache modes, so the KV row on this page can drop a long way.</li>
+        </ul>
+        <p>Flash attention removes the O(context squared) attention score matrix from memory, which matters most at long context and large batch. Paged attention changes how the KV pool is allocated, not how big one sequence's cache is.</p>
+      </details>
+
+      <details>
+        <summary>Architectures this formula does not describe</summary>
+        <ul class="plain">
+          <li><b>Multi-head latent attention</b> (the DeepSeek V2/V3 family) compresses the cache into a latent vector. This page would overestimate it badly.</li>
+          <li><b>Sliding-window or interleaved local attention</b> (Mistral's window, Gemma 2's alternating layers) caps the cache per window instead of growing with full context, so real usage is lower than shown once context passes the window.</li>
+          <li><b>State-space and hybrid models</b> (Mamba and friends) carry a fixed-size state instead of a growing cache.</li>
+          <li><b>Mixture of experts:</b> the KV math holds, but weights must count every expert, not just the active ones.</li>
+        </ul>
+      </details>
+    </div>
+  </div>
+</div>
+
+<footer class="bottom">
+  <a href="https://elitesystem.ai">An elitesystem.ai tool</a>
+  <a href="https://github.com/0xelitesystem/llm-vram-calculator">Source on GitHub</a>
+  <a href="https://0xelitesystem.github.io/">More tools</a>
+  <span>Runs entirely in your browser. Nothing is uploaded.</span>
+</footer>
+</div>
+
+<div id="live" class="sr-only" aria-live="polite"></div>
+
+<script>
+/* =========================================================================
+   PURE CORE
+   Every function below takes plain input and returns a plain result object.
+   No document, no window, no side effects. Safe to require() and unit test.
+   ========================================================================= */
+
+var BYTES_PER_GIB = 1073741824;
+
+/* Bits per weight.
+   exact   = fixed by the number format
+   format  = fixed by the GGUF block layout, arithmetic shown in the note
+   approx  = whole-file average for a mixed class, label it as approximate  */
+var QUANT_PRESETS = [
+  { id: 'fp16',   label: 'FP16 / BF16',        bpw: 16,   kind: 'exact',
+    note: '16 bits per weight. Exact.' },
+  { id: 'fp8',    label: 'FP8 (E4M3 / E5M2)',  bpw: 8,    kind: 'exact',
+    note: '8 bits per weight. Exact. Per-tensor or per-channel scales add a negligible amount.' },
+  { id: 'int8',   label: 'INT8',               bpw: 8,    kind: 'exact',
+    note: '8 bits per weight. Exact. Scale and zero-point tensors add a small amount that depends on the scheme.' },
+  { id: 'q8_0',   label: 'Q8_0 (GGUF)',        bpw: 8.5,  kind: 'format',
+    note: 'Fixed by the block layout: 32 int8 values plus one FP16 scale, so (32 x 8 + 16) / 32 = 8.5 bits per weight.' },
+  { id: 'q6_k',   label: 'Q6_K (GGUF)',        bpw: 6.56, kind: 'approx',
+    note: 'Approximate whole-file average. The Q6_K tensor type itself is fixed by its block layout at 210 bytes per 256 weights, so (210 x 8) / 256 = 6.5625 bits, and the file average lands close to it. Measured files land near 6.56 for LLaMA-7B and 6.57 for Llama 3.1 8B.' },
+  { id: 'q5_k_m', label: 'Q5_K_M (GGUF)',      bpw: 5.67, kind: 'approx',
+    note: 'Approximate whole-file average, taken from llama.cpp published file sizes. The _M variants mix tensor types, so the real figure moves a few percent between models: about 5.67 for LLaMA-7B, about 5.70 for Llama 3.1 8B.' },
+  { id: 'q4_k_m', label: 'Q4_K_M (GGUF)',      bpw: 4.83, kind: 'approx',
+    note: 'Approximate whole-file average, and the most common choice for local use. The Q4_K tensor type alone is 144 bytes per 256 weights, so exactly 4.5 bits; _M pushes it up by keeping some tensors at Q6_K. The file average runs about 4.83 for LLaMA-7B and about 4.90 for Llama 3.1 8B, so treat it as 4.8 to 4.9.' },
+  { id: 'q4_0',   label: 'Q4_0 (GGUF)',        bpw: 4.5,  kind: 'format',
+    note: 'Fixed by the block layout: 32 four-bit values plus one FP16 scale, so (32 x 4 + 16) / 32 = 4.5 bits per weight.' },
+  { id: 'q3_k_m', label: 'Q3_K_M (GGUF)',      bpw: 3.91, kind: 'approx',
+    note: 'Approximate whole-file average, and one of the widest spreads in this list: about 3.91 for LLaMA-7B, about 4.00 for Llama 3.1 8B. Quality loss starts being noticeable here on smaller models.' },
+  { id: 'q2_k',   label: 'Q2_K (GGUF)',        bpw: 3.35, kind: 'approx',
+    note: 'Approximate whole-file average, and much higher than the Q2_K tensor type itself, which is 84 bytes per 256 weights, so (84 x 8) / 256 = 2.625 bits. The gap is because embeddings, output and some attention tensors are kept at higher precision. The file average is about 3.35 for LLaMA-7B and about 3.16 for Llama 3.1 8B, the widest spread here. Quality loss is real at this level.' },
+  { id: 'custom', label: 'Custom (type your own)', bpw: 4.83, kind: 'custom',
+    note: 'Type any value. If you have the file already: bits per weight = file size in bytes x 8 / parameter count.' }
+];
+
+var KV_PRESETS = [
+  { id: 'fp16',   label: 'FP16 / BF16 (default in most engines)', bits: 16 },
+  { id: 'fp8',    label: 'FP8',                                   bits: 8 },
+  { id: 'int8',   label: 'INT8 / Q8_0 cache',                     bits: 8 },
+  { id: 'custom', label: 'Custom (type your own)',                bits: 16 }
+];
+
+/* Architecture numbers are read straight out of each model's published config.json
+   (num_hidden_layers, num_attention_heads, num_key_value_heads, head_dim or
+   hidden_size / num_attention_heads). Parameter counts are the safetensors totals
+   reported on the model repo, not the rounded marketing figure, because the weight
+   term is arithmetic on that number. Everything here is editable in the UI. */
+var MODEL_PRESETS = [
+  { id: 'llama32-1b', label: 'Llama 3.2 1B', params: 1.24, layers: 16, heads: 32, kvHeads: 8, headDim: 64, ctx: 8192,
+    note: 'Grouped-query attention, head dimension 64. Native context is 128k, which this preset does not assume for you.' },
+  { id: 'llama32-3b', label: 'Llama 3.2 3B', params: 3.21, layers: 28, heads: 24, kvHeads: 8, headDim: 128, ctx: 8192,
+    note: 'Grouped-query attention. Native context is 128k.' },
+  { id: 'llama31-8b', label: 'Llama 3.1 / 3.0 8B', params: 8.03, layers: 32, heads: 32, kvHeads: 8, headDim: 128, ctx: 8192,
+    note: 'The default local model for most people. 8 key/value heads against 32 attention heads, so the KV cache is a quarter of what multi-head attention would cost.' },
+  { id: 'llama31-70b', label: 'Llama 3.1 / 3.0 70B', params: 70.55, layers: 80, heads: 64, kvHeads: 8, headDim: 128, ctx: 8192,
+    note: 'Eight key/value heads at 80 layers. Weights dominate here, not the cache.' },
+  { id: 'llama2-7b', label: 'Llama 2 7B', params: 6.74, layers: 32, heads: 32, kvHeads: 32, headDim: 128, ctx: 4096,
+    note: 'Plain multi-head attention: 32 key/value heads. Close to Llama 3 8B in size (6.74B against 8.03B) and identical in layers and head dimension, yet it costs exactly four times the KV cache per token, because 32 key/value heads against 8. The clearest example of why the kv_heads field matters.' },
+  { id: 'llama2-13b', label: 'Llama 2 13B', params: 13.02, layers: 40, heads: 40, kvHeads: 40, headDim: 128, ctx: 4096,
+    note: 'Multi-head attention, no grouping. The cache gets expensive fast.' },
+  { id: 'mistral-7b', label: 'Mistral 7B v0.3', params: 7.25, layers: 32, heads: 32, kvHeads: 8, headDim: 128, ctx: 8192,
+    note: 'Grouped-query attention. The v0.1 release also used a 4096-token sliding window, which caps real cache growth below what this page shows.' },
+  { id: 'mixtral-8x7b', label: 'Mixtral 8x7B (MoE)', params: 46.7, layers: 32, heads: 32, kvHeads: 8, headDim: 128, ctx: 8192,
+    note: 'Mixture of experts: 46.7B total parameters, all of which must be resident, even though only 2 of the 8 experts per layer run on any given token. That works out to about 12.9B active parameters, so the speed is nearer a 13B model than the 7B in the name, and the memory is the full 46.7B either way.' },
+  { id: 'qwen25-7b', label: 'Qwen2.5 7B', params: 7.62, layers: 28, heads: 28, kvHeads: 4, headDim: 128, ctx: 8192,
+    note: 'Only 4 key/value heads, so the KV cache is unusually cheap for its size.' },
+  { id: 'qwen25-14b', label: 'Qwen2.5 14B', params: 14.77, layers: 48, heads: 40, kvHeads: 8, headDim: 128, ctx: 8192,
+    note: 'Grouped-query attention, 48 layers. 14.77B is the real tensor count; the model card rounds it to 14.7B.' },
+  { id: 'qwen25-32b', label: 'Qwen2.5 32B', params: 32.76, layers: 64, heads: 40, kvHeads: 8, headDim: 128, ctx: 8192,
+    note: 'Grouped-query attention, 64 layers. 32.76B is the real tensor count; the model card says 32.5B, which is the figure excluding part of the embedding, and it understates the weight term by nearly a percent. A 24 GB card runs this at 4-bit with modest context.' },
+  { id: 'qwen25-72b', label: 'Qwen2.5 72B', params: 72.71, layers: 80, heads: 64, kvHeads: 8, headDim: 128, ctx: 8192,
+    note: 'Grouped-query attention, 80 layers.' },
+  { id: 'gemma2-9b', label: 'Gemma 2 9B', params: 9.24, layers: 42, heads: 16, kvHeads: 8, headDim: 256, ctx: 8192,
+    note: 'Head dimension 256, unusually large. It also alternates sliding-window and full-attention layers, so real cache use is lower than the number shown here once context passes the window.' }
+];
+
+/* Advertised board capacities. Every one is editable through the My VRAM field. */
+var GPU_PRESETS = [
+  { id: 'rtx3060-12', label: 'RTX 3060 12GB', gib: 12, group: 'NVIDIA consumer' },
+  { id: 'rtx3080-10', label: 'RTX 3080 (10GB)', gib: 10, group: 'NVIDIA consumer' },
+  { id: 'rtx3090', label: 'RTX 3090 / 3090 Ti', gib: 24, group: 'NVIDIA consumer' },
+  { id: 'rtx4060ti-16', label: 'RTX 4060 Ti 16GB', gib: 16, group: 'NVIDIA consumer' },
+  { id: 'rtx4070', label: 'RTX 4070 / 4070 Super', gib: 12, group: 'NVIDIA consumer' },
+  { id: 'rtx4070tis', label: 'RTX 4070 Ti Super', gib: 16, group: 'NVIDIA consumer' },
+  { id: 'rtx4080', label: 'RTX 4080 / 4080 Super', gib: 16, group: 'NVIDIA consumer' },
+  { id: 'rtx4090', label: 'RTX 4090', gib: 24, group: 'NVIDIA consumer' },
+  { id: 'rtx5070', label: 'RTX 5070', gib: 12, group: 'NVIDIA consumer' },
+  { id: 'rtx5070ti', label: 'RTX 5070 Ti', gib: 16, group: 'NVIDIA consumer' },
+  { id: 'rtx5080', label: 'RTX 5080', gib: 16, group: 'NVIDIA consumer' },
+  { id: 'rtx5090', label: 'RTX 5090', gib: 32, group: 'NVIDIA consumer' },
+  { id: 'a4000', label: 'RTX A4000', gib: 16, group: 'Workstation' },
+  { id: 'a5000', label: 'RTX A5000', gib: 24, group: 'Workstation' },
+  { id: 'a6000', label: 'RTX A6000 / RTX 6000 Ada', gib: 48, group: 'Workstation' },
+  { id: 'l4', label: 'NVIDIA L4', gib: 24, group: 'Datacenter' },
+  { id: 'l40s', label: 'NVIDIA L40S', gib: 48, group: 'Datacenter' },
+  { id: 'a100-40', label: 'A100 40GB', gib: 40, group: 'Datacenter' },
+  { id: 'a100-80', label: 'A100 80GB', gib: 80, group: 'Datacenter' },
+  { id: 'h100-80', label: 'H100 80GB', gib: 80, group: 'Datacenter' },
+  { id: 'h200', label: 'H200 141GB', gib: 141, group: 'Datacenter' },
+  { id: 'mi300x', label: 'AMD Instinct MI300X', gib: 192, group: 'Datacenter' },
+  { id: 'apple-16', label: 'Apple unified memory, 16 GB total', gib: 16, group: 'Apple unified memory', unified: true },
+  { id: 'apple-32', label: 'Apple unified memory, 32 GB total', gib: 32, group: 'Apple unified memory', unified: true },
+  { id: 'apple-64', label: 'Apple unified memory, 64 GB total', gib: 64, group: 'Apple unified memory', unified: true },
+  { id: 'apple-128', label: 'Apple unified memory, 128 GB total', gib: 128, group: 'Apple unified memory', unified: true }
+];
+
+/* Apple unified memory is not dedicated VRAM. macOS caps how much of it the GPU
+   may wire down. Metal's recommendedMaxWorkingSetSize sits at roughly 75% of total
+   RAM by default, which is what the iogpu.wired_limit_mb sysctl reports at its
+   default of 0. 0.75 is used only to stop the table from claiming a 16 GB Mac has
+   16 GB of VRAM. It varies by machine, it can be raised, and it is editable here
+   through My VRAM. */
+var UNIFIED_USABLE_FRACTION = 0.75;
+
+var UNIFIED_MEMORY_NOTE = 'Apple unified memory is shared with the operating system and every other app, so the GPU cannot use all of it. macOS wires down roughly 75% of total RAM for the GPU by default (Metal reports this as recommendedMaxWorkingSetSize; the iogpu.wired_limit_mb sysctl overrides it). That is approximate and it varies by machine, so rows and fields for Apple machines apply a 0.75 factor to the total and label it as approximate. If you know your real limit, type it into My VRAM.';
+
+function effectiveCapacityGib(gpu, unifiedFraction) {
+  if (!gpu) { return 0; }
+  return gpu.unified ? gpu.gib * unifiedFraction : gpu.gib;
+}
+
+/* --- small pure helpers --- */
+
+/* Prototype-safe lookup map. Keys can be anything a user types, including
+   "constructor" and "__proto__", without changing behaviour. */
+function buildIndex(list, keyName) {
+  var map = Object.create(null);
+  for (var i = 0; i < list.length; i++) {
+    map[String(list[i][keyName])] = list[i];
+  }
+  return map;
+}
+
+function lookupIn(map, key) {
+  var k = String(key);
+  return Object.prototype.hasOwnProperty.call(map, k) ? map[k] : null;
+}
+
+function toGib(bytes) { return bytes / BYTES_PER_GIB; }
+
+function roundTo(n, places) {
+  var f = Math.pow(10, places);
+  return Math.round(n * f) / f;
+}
+
+function fmtGib(bytes, places) {
+  var p = (typeof places === 'number') ? places : 2;
+  return roundTo(toGib(bytes), p).toFixed(p);
+}
+
+/* Digit grouping without a regex, so there is nothing to backtrack. */
+function groupDigits(value) {
+  var s = String(Math.round(value));
+  var negative = s.charAt(0) === '-';
+  if (negative) { s = s.slice(1); }
+  var out = '';
+  var count = 0;
+  for (var i = s.length - 1; i >= 0; i--) {
+    out = s.charAt(i) + out;
+    count++;
+    if (count % 3 === 0 && i > 0) { out = ',' + out; }
+  }
+  return (negative ? '-' : '') + out;
+}
+
+function isPositiveNumber(v) {
+  return typeof v === 'number' && isFinite(v) && v > 0;
+}
+
+/* --- the three memory terms --- */
+
+function computeWeightBytes(paramsBillions, bitsPerWeight) {
+  return paramsBillions * 1e9 * bitsPerWeight / 8;
+}
+
+/* KV cache bytes per token, per sequence:
+   2 (one key, one value) x layers x kv_heads x head_dim x bytes_per_element.
+   kv_heads, not attention heads, so grouped-query and multi-query models
+   are not massively overestimated. */
+function computeKvBytesPerToken(layers, kvHeads, headDim, kvBits) {
+  return 2 * layers * kvHeads * headDim * (kvBits / 8);
+}
+
+function computeKvBytes(layers, kvHeads, headDim, contextLength, batchSize, kvBits) {
+  return computeKvBytesPerToken(layers, kvHeads, headDim, kvBits) * contextLength * batchSize;
+}
+
+/* --- the whole estimate --- */
+
+function estimateVram(input) {
+  var errors = [];
+  var warnings = [];
+
+  var params = Number(input.paramsBillions);
+  var bpw = Number(input.bitsPerWeight);
+  var layers = Math.floor(Number(input.layers));
+  var heads = Math.floor(Number(input.heads));
+  var kvHeads = Math.floor(Number(input.kvHeads));
+  var headDim = Math.floor(Number(input.headDim));
+  var ctx = Math.floor(Number(input.contextLength));
+  var batch = Math.floor(Number(input.batchSize));
+  var kvBits = Number(input.kvBits);
+  var actLowPct = Number(input.actLowPct);
+  var actHighPct = Number(input.actHighPct);
+  var rtLowGib = Number(input.rtLowGib);
+  var rtHighGib = Number(input.rtHighGib);
+
+  if (!isPositiveNumber(params)) { errors.push('Parameter count must be a number above zero.'); }
+  if (!isPositiveNumber(bpw)) { errors.push('Bits per weight must be a number above zero.'); }
+  if (!isPositiveNumber(layers)) { errors.push('Layers must be a whole number above zero.'); }
+  if (!isPositiveNumber(kvHeads)) { errors.push('Key/value heads must be a whole number above zero.'); }
+  if (!isPositiveNumber(headDim)) { errors.push('Head dimension must be a whole number above zero.'); }
+  if (!isPositiveNumber(ctx)) { errors.push('Context length must be a whole number above zero.'); }
+  if (!isPositiveNumber(batch)) { errors.push('Batch size must be a whole number above zero.'); }
+  if (!isPositiveNumber(kvBits)) { errors.push('KV bits per element must be a number above zero.'); }
+  if (!(isFinite(actLowPct) && actLowPct >= 0)) { errors.push('Activation low percentage must be zero or more.'); }
+  if (!(isFinite(actHighPct) && actHighPct >= 0)) { errors.push('Activation high percentage must be zero or more.'); }
+  if (!(isFinite(rtLowGib) && rtLowGib >= 0)) { errors.push('Runtime low must be zero or more.'); }
+  if (!(isFinite(rtHighGib) && rtHighGib >= 0)) { errors.push('Runtime high must be zero or more.'); }
+
+  if (errors.length) {
+    return { ok: false, errors: errors, warnings: warnings };
+  }
+
+  if (actHighPct < actLowPct) { var swapA = actLowPct; actLowPct = actHighPct; actHighPct = swapA; }
+  if (rtHighGib < rtLowGib) { var swapR = rtLowGib; rtLowGib = rtHighGib; rtHighGib = swapR; }
+
+  if (isPositiveNumber(heads)) {
+    if (kvHeads > heads) {
+      warnings.push('Key/value heads (' + kvHeads + ') is larger than attention heads (' + heads + '). That is not a shape any standard transformer uses; check config.json.');
+    } else if (heads % kvHeads !== 0) {
+      warnings.push('Attention heads (' + heads + ') is not a whole multiple of key/value heads (' + kvHeads + '). Grouped-query attention normally divides evenly, so one of the two is probably wrong.');
+    }
+  }
+  if (bpw > 16) {
+    warnings.push('Bits per weight above 16 means FP32 or larger. That is unusual for inference.');
+  }
+
+  var weightBytes = computeWeightBytes(params, bpw);
+  var kvPerToken = computeKvBytesPerToken(layers, kvHeads, headDim, kvBits);
+  var kvBytes = kvPerToken * ctx * batch;
+  var exactBytes = weightBytes + kvBytes;
+
+  var actLowBytes = exactBytes * (actLowPct / 100);
+  var actHighBytes = exactBytes * (actHighPct / 100);
+  var rtLowBytes = rtLowGib * BYTES_PER_GIB;
+  var rtHighBytes = rtHighGib * BYTES_PER_GIB;
+
+  var totalLow = exactBytes + actLowBytes + rtLowBytes;
+  var totalHigh = exactBytes + actHighBytes + rtHighBytes;
+
+  /* Overflow guard. A double runs out near 1.8e308, and params x bits or
+     ctx x batch can pass that. Printing "Infinity GiB" as if it were an answer
+     is worse than refusing, so refuse. */
+  if (!isFinite(weightBytes) || !isFinite(kvBytes) || !isFinite(totalLow) || !isFinite(totalHigh)) {
+    return {
+      ok: false,
+      errors: ['Those numbers overflow double-precision floating point, so there is no honest answer to print. Check the parameter count, context length and batch size.'],
+      warnings: warnings
+    };
+  }
+
+  var kvShare = exactBytes > 0 ? (kvBytes / exactBytes) * 100 : 0;
+
+  return {
+    ok: true,
+    errors: [],
+    warnings: warnings,
+    inputs: {
+      paramsBillions: params, bitsPerWeight: bpw, layers: layers, heads: heads,
+      kvHeads: kvHeads, headDim: headDim, contextLength: ctx, batchSize: batch,
+      kvBits: kvBits, actLowPct: actLowPct, actHighPct: actHighPct,
+      rtLowGib: rtLowGib, rtHighGib: rtHighGib
+    },
+    weights: {
+      bytes: weightBytes,
+      confidence: 'near-exact',
+      derivation: params + 'e9 params x ' + bpw + ' bits / 8 bits per byte = ' +
+                  groupDigits(weightBytes) + ' bytes = ' + fmtGib(weightBytes) + ' GiB'
+    },
+    kv: {
+      bytes: kvBytes,
+      perTokenBytes: kvPerToken,
+      per1kTokensBytes: kvPerToken * 1024,
+      sharePct: kvShare,
+      confidence: 'near-exact',
+      derivation: '2 x ' + layers + ' layers x ' + kvHeads + ' kv_heads x ' + headDim +
+                  ' head_dim x ' + groupDigits(ctx) + ' ctx x ' + batch + ' batch x ' +
+                  (kvBits / 8) + ' bytes = ' + groupDigits(kvBytes) + ' bytes = ' + fmtGib(kvBytes) + ' GiB',
+      perTokenDerivation: '2 x ' + layers + ' x ' + kvHeads + ' x ' + headDim + ' x ' + (kvBits / 8) +
+                  ' = ' + groupDigits(kvPerToken) + ' bytes per token per sequence'
+    },
+    activation: {
+      lowBytes: actLowBytes,
+      highBytes: actHighBytes,
+      confidence: 'estimate',
+      derivation: actLowPct + '% to ' + actHighPct + '% of (weights + KV = ' + fmtGib(exactBytes) +
+                  ' GiB) = ' + fmtGib(actLowBytes) + ' to ' + fmtGib(actHighBytes) + ' GiB (rule of thumb, not measured)'
+    },
+    runtime: {
+      lowBytes: rtLowBytes,
+      highBytes: rtHighBytes,
+      confidence: 'estimate',
+      derivation: 'flat allowance of ' + rtLowGib + ' to ' + rtHighGib + ' GiB for the CUDA or runtime context and allocator overhead (typical, not measured)'
+    },
+    exactBytes: exactBytes,
+    total: {
+      lowBytes: totalLow,
+      highBytes: totalHigh,
+      lowGib: toGib(totalLow),
+      highGib: toGib(totalHigh)
+    }
+  };
+}
+
+/* --- fit --- */
+
+function usableBytesFor(capacityGib, reservedGib) {
+  var cap = Number(capacityGib);
+  var res = Number(reservedGib);
+  if (!isFinite(cap) || cap <= 0) { return 0; }
+  if (!isFinite(res) || res < 0) { res = 0; }
+  return Math.max(0, (cap - res) * BYTES_PER_GIB);
+}
+
+/* status: fits  = even the high estimate leaves room
+           tight = the low estimate fits, the high one does not
+           no    = not even the low estimate fits */
+function checkFit(result, capacityGib, reservedGib) {
+  var usable = usableBytesFor(capacityGib, reservedGib);
+  if (!result || !result.ok) {
+    return { status: 'unknown', usableBytes: usable };
+  }
+  var status = 'no';
+  if (result.total.highBytes <= usable) { status = 'fits'; }
+  else if (result.total.lowBytes <= usable) { status = 'tight'; }
+  return {
+    status: status,
+    usableBytes: usable,
+    usableGib: toGib(usable),
+    headroomGib: toGib(usable - result.total.highBytes),
+    shortfallGib: toGib(result.total.lowBytes - usable),
+    capacityGib: Number(capacityGib),
+    reservedGib: Number(reservedGib)
+  };
+}
+
+/* Largest context that still fits, solved from the high estimate so the answer
+   is the conservative one:
+     usable >= (W + KV) x (1 + actHigh) + runtimeHigh
+     KV     <= (usable - runtimeHigh) / (1 + actHigh) - W          */
+function maxContextThatFits(input, usableBytes) {
+  var base = estimateVram(input);
+  if (!base.ok) { return { ok: false, tokens: 0 }; }
+  var w = base.weights.bytes;
+  var mult = 1 + (base.inputs.actHighPct / 100);
+  var rt = base.runtime.highBytes;
+  var kvBudget = (usableBytes - rt) / mult - w;
+  var perTokenAll = base.kv.perTokenBytes * base.inputs.batchSize;
+  if (kvBudget <= 0 || perTokenAll <= 0) {
+    return { ok: true, tokens: 0, weightsAloneFit: (w * mult + rt) <= usableBytes,
+      derivation: 'KV budget after weights and overhead is zero or negative, so no context fits at this quantization.' };
+  }
+  var tokens = Math.floor(kvBudget / perTokenAll);
+  /* Round down to a 256-token step, but only when there is at least one full step.
+     Rounding 200 tokens down to 0 would read as "no context fits at all", which is
+     a different claim and a false one. */
+  var rounded = tokens >= 256 ? Math.floor(tokens / 256) * 256 : Math.max(0, tokens);
+  return {
+    ok: true,
+    tokens: rounded,
+    exactTokens: tokens,
+    weightsAloneFit: true,
+    derivation: '((' + fmtGib(usableBytes) + ' GiB usable - ' + fmtGib(rt) + ' GiB runtime) / ' +
+      roundTo(mult, 3) + ' - ' + fmtGib(w) + ' GiB weights) / ' + groupDigits(perTokenAll) +
+      ' bytes per token = ' + groupDigits(tokens) + ' tokens, rounded down to ' + groupDigits(rounded)
+  };
+}
+
+/* Which weight quantizations fit at the current context, high estimate.
+   Sorted by bits per weight, largest first, so "the first one that fits"
+   really is the largest one that fits. */
+function quantsThatFit(input, usableBytes, quantList) {
+  var out = [];
+  var sorted = quantList.slice().sort(function (a, b) { return b.bpw - a.bpw; });
+  for (var i = 0; i < sorted.length; i++) {
+    var q = sorted[i];
+    if (q.kind === 'custom') { continue; }
+    var trial = estimateVram({
+      paramsBillions: input.paramsBillions, bitsPerWeight: q.bpw,
+      layers: input.layers, heads: input.heads, kvHeads: input.kvHeads, headDim: input.headDim,
+      contextLength: input.contextLength, batchSize: input.batchSize, kvBits: input.kvBits,
+      actLowPct: input.actLowPct, actHighPct: input.actHighPct,
+      rtLowGib: input.rtLowGib, rtHighGib: input.rtHighGib
+    });
+    if (!trial.ok) { continue; }
+    out.push({
+      id: q.id, label: q.label, bpw: q.bpw, kind: q.kind,
+      highGib: trial.total.highGib, lowGib: trial.total.lowGib,
+      fits: trial.total.highBytes <= usableBytes,
+      tight: trial.total.highBytes > usableBytes && trial.total.lowBytes <= usableBytes
+    });
+  }
+  return out;
+}
+
+/* What a quantized KV cache would save at the current settings. */
+function kvQuantSaving(input, newKvBits) {
+  var before = estimateVram(input);
+  if (!before.ok) { return null; }
+  var after = estimateVram({
+    paramsBillions: input.paramsBillions, bitsPerWeight: input.bitsPerWeight,
+    layers: input.layers, heads: input.heads, kvHeads: input.kvHeads, headDim: input.headDim,
+    contextLength: input.contextLength, batchSize: input.batchSize, kvBits: newKvBits,
+    actLowPct: input.actLowPct, actHighPct: input.actHighPct,
+    rtLowGib: input.rtLowGib, rtHighGib: input.rtHighGib
+  });
+  if (!after.ok) { return null; }
+  return {
+    fromBits: input.kvBits,
+    toBits: newKvBits,
+    savedGib: toGib(before.total.highBytes - after.total.highBytes),
+    newHighGib: after.total.highGib,
+    newLowGib: after.total.lowGib
+  };
+}
+
+/* Partial offload. Per-layer cost is approximate: embedding, output head and
+   final norm are not per-layer, so the real split is a little different. */
+function computeOffload(result, usableBytes) {
+  if (!result || !result.ok) { return null; }
+  var layers = result.inputs.layers;
+  var perLayerBytes = (result.weights.bytes + result.kv.bytes) / layers;
+  var fixedBytes = result.activation.highBytes + result.runtime.highBytes;
+  var available = usableBytes - fixedBytes;
+  var fit = available > 0 ? Math.floor(available / perLayerBytes) : 0;
+  if (fit > layers) { fit = layers; }
+  if (fit < 0) { fit = 0; }
+  var spillLayers = layers - fit;
+  return {
+    totalLayers: layers,
+    layersOnGpu: fit,
+    layersOnCpu: spillLayers,
+    perLayerBytes: perLayerBytes,
+    gpuBytes: fit * perLayerBytes + fixedBytes,
+    cpuBytes: spillLayers * perLayerBytes,
+    fullyOffloaded: spillLayers === 0,
+    derivation: '(' + fmtGib(usableBytes) + ' GiB usable - ' + fmtGib(fixedBytes) +
+      ' GiB overhead) / ' + fmtGib(perLayerBytes, 3) + ' GiB per layer = ' + fit + ' of ' + layers + ' layers'
+  };
+}
+
+/* Plain-text summary of the whole estimate. */
+function buildSummary(result, fit, gpuLabel, offload, maxCtx) {
+  if (!result || !result.ok) {
+    return 'No estimate: ' + ((result && result.errors) ? result.errors.join(' ') : 'invalid input');
+  }
+  var i = result.inputs;
+  var lines = [];
+  lines.push('LLM VRAM ESTIMATE');
+  lines.push('=================');
+  lines.push('');
+  lines.push('Model:      ' + i.paramsBillions + 'B params at ' + i.bitsPerWeight + ' bits per weight');
+  lines.push('Shape:      ' + i.layers + ' layers, ' + i.heads + ' heads, ' + i.kvHeads +
+             ' kv heads, head_dim ' + i.headDim);
+  lines.push('Serving:    ' + groupDigits(i.contextLength) + ' token context, batch ' + i.batchSize +
+             ', KV at ' + i.kvBits + ' bits');
+  lines.push('');
+  lines.push('BREAKDOWN (GiB, 1024^3 bytes)');
+  lines.push('  Weights            ' + fmtGib(result.weights.bytes) + '   [near-exact arithmetic]');
+  lines.push('    ' + result.weights.derivation);
+  lines.push('  KV cache           ' + fmtGib(result.kv.bytes) + '   [near-exact arithmetic]');
+  lines.push('    ' + result.kv.derivation);
+  lines.push('    ' + result.kv.perTokenDerivation);
+  lines.push('  Activation/work    ' + fmtGib(result.activation.lowBytes) + ' to ' +
+             fmtGib(result.activation.highBytes) + '   [ESTIMATE, not measured]');
+  lines.push('    ' + result.activation.derivation);
+  lines.push('  Runtime context    ' + fmtGib(result.runtime.lowBytes) + ' to ' +
+             fmtGib(result.runtime.highBytes) + '   [ESTIMATE, not measured]');
+  lines.push('    ' + result.runtime.derivation);
+  lines.push('  ------------------------------------');
+  lines.push('  TOTAL              ' + roundTo(result.total.lowGib, 2).toFixed(2) + ' to ' +
+             roundTo(result.total.highGib, 2).toFixed(2) + ' GiB');
+  lines.push('');
+  if (fit && fit.status !== 'unknown') {
+    lines.push('AGAINST ' + gpuLabel);
+    lines.push('  Capacity ' + roundTo(fit.capacityGib, 2) + ' GiB, minus ' + roundTo(fit.reservedGib, 2) +
+               ' GiB reserved = ' + roundTo(fit.usableGib, 2).toFixed(2) + ' GiB usable');
+    if (fit.status === 'fits') {
+      lines.push('  VERDICT: fits, with ' + roundTo(fit.headroomGib, 2).toFixed(2) +
+                 ' GiB spare even at the high end of the estimate');
+    } else if (fit.status === 'tight') {
+      lines.push('  VERDICT: borderline. The low estimate fits, the high estimate is over by ' +
+                 roundTo(-fit.headroomGib, 2).toFixed(2) + ' GiB. Expect it to work sometimes and fail on long prompts.');
+    } else {
+      lines.push('  VERDICT: does not fit. Short by at least ' + roundTo(fit.shortfallGib, 2).toFixed(2) + ' GiB.');
+    }
+    if (maxCtx && maxCtx.ok) {
+      lines.push('  Largest context that fits at these settings: ' +
+        (maxCtx.tokens > 0
+          ? groupDigits(maxCtx.tokens) + ' tokens'
+          : (maxCtx.weightsAloneFit
+              ? 'under one token, the weights and overhead use the card on their own'
+              : 'none, the weights alone plus overhead already exceed usable VRAM')));
+    }
+    if (offload && !offload.fullyOffloaded) {
+      lines.push('  Partial offload: about ' + offload.layersOnGpu + ' of ' + offload.totalLayers +
+                 ' layers on the GPU, ' + offload.layersOnCpu + ' in system RAM (approximate). CPU offload is dramatically slower.');
+    }
+  }
+  lines.push('');
+  lines.push('HONESTY NOTE');
+  lines.push('  Weights and KV cache are arithmetic from the shapes above and are near-exact.');
+  lines.push('  Activation, workspace and runtime overhead are estimates, not measurements.');
+  lines.push('  Real usage varies by engine: llama.cpp, vLLM, transformers and ExLlama all differ.');
+  lines.push('  Flash attention, paged attention and quantized caches all change the picture.');
+  lines.push('  Mixed GGUF classes (_K_M, _K_S) have approximate bits per weight, a few percent either way.');
+  lines.push('  Verify with nvidia-smi once the model is loaded.');
+  lines.push('');
+  lines.push('Generated by https://0xelitesystem.github.io/llm-vram-calculator/');
+  return lines.join('\n');
+}
+
+/* Node-friendly export, ignored in the browser. */
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    BYTES_PER_GIB: BYTES_PER_GIB,
+    QUANT_PRESETS: QUANT_PRESETS,
+    KV_PRESETS: KV_PRESETS,
+    MODEL_PRESETS: MODEL_PRESETS,
+    GPU_PRESETS: GPU_PRESETS,
+    UNIFIED_USABLE_FRACTION: UNIFIED_USABLE_FRACTION,
+    effectiveCapacityGib: effectiveCapacityGib,
+    buildIndex: buildIndex,
+    lookupIn: lookupIn,
+    toGib: toGib,
+    roundTo: roundTo,
+    fmtGib: fmtGib,
+    groupDigits: groupDigits,
+    computeWeightBytes: computeWeightBytes,
+    computeKvBytesPerToken: computeKvBytesPerToken,
+    computeKvBytes: computeKvBytes,
+    estimateVram: estimateVram,
+    usableBytesFor: usableBytesFor,
+    checkFit: checkFit,
+    maxContextThatFits: maxContextThatFits,
+    quantsThatFit: quantsThatFit,
+    kvQuantSaving: kvQuantSaving,
+    computeOffload: computeOffload,
+    buildSummary: buildSummary
+  };
+}
+</script>
+
+<script>
+/* =========================================================================
+   UI LAYER
+   ========================================================================= */
+(function () {
+  'use strict';
+
+  var QUANT_INDEX = buildIndex(QUANT_PRESETS, 'id');
+  var KV_INDEX = buildIndex(KV_PRESETS, 'id');
+  var MODEL_INDEX = buildIndex(MODEL_PRESETS, 'id');
+  var GPU_INDEX = buildIndex(GPU_PRESETS, 'id');
+
+  var DEFAULTS = {
+    actLowPct: 5,
+    actHighPct: 12,
+    rtLowGib: 0.4,
+    rtHighGib: 1,
+    reservedGib: 0.5,
+    batchSize: 1
+  };
+
+  /* Element cache. Keys come from the fixed list below, never from user input,
+     but a null prototype keeps it a map rather than something with inherited keys. */
+  var el = Object.create(null);
+  var ids = ['preset', 'presetNote', 'params', 'sizeChips', 'quant', 'bpw', 'bpwNote', 'ctx', 'ctxChips',
+    'batch', 'kvquant', 'kvbits', 'layers', 'heads', 'kvheads', 'headdim', 'actLow', 'actHigh',
+    'rtLow', 'rtHigh', 'gpu', 'myvram', 'reserved', 'gpuNote', 'results', 'summaryPanel',
+    'summaryOut', 'copyBtn', 'sampleBtn', 'resetBtn', 'themeBtn', 'live'];
+  for (var n = 0; n < ids.length; n++) { el[ids[n]] = document.getElementById(ids[n]); }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  /* ---------- theme ---------- */
+  function currentTheme() {
+    return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  }
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    el.themeBtn.textContent = theme === 'light' ? 'Dark mode' : 'Light mode';
+    el.themeBtn.setAttribute('aria-pressed', theme === 'light' ? 'true' : 'false');
+  }
+  applyTheme(currentTheme());
+  el.themeBtn.addEventListener('click', function () {
+    var next = currentTheme() === 'light' ? 'dark' : 'light';
+    applyTheme(next);
+    try { window.localStorage.setItem('llm-vram-theme', next); } catch (e) { /* ignore */ }
+  });
+
+  /* ---------- populate selects ---------- */
+  function addOption(select, value, label) {
+    var o = document.createElement('option');
+    o.value = value;
+    o.textContent = label;
+    select.appendChild(o);
+    return o;
+  }
+
+  for (var m = 0; m < MODEL_PRESETS.length; m++) {
+    addOption(el.preset, MODEL_PRESETS[m].id, MODEL_PRESETS[m].label);
+  }
+  for (var q = 0; q < QUANT_PRESETS.length; q++) {
+    addOption(el.quant, QUANT_PRESETS[q].id, QUANT_PRESETS[q].label + ' (' + QUANT_PRESETS[q].bpw + ' bpw)');
+  }
+  for (var k = 0; k < KV_PRESETS.length; k++) {
+    addOption(el.kvquant, KV_PRESETS[k].id, KV_PRESETS[k].label);
+  }
+  (function () {
+    addOption(el.gpu, '', 'Custom / type it below');
+    var groups = Object.create(null);
+    var order = [];
+    for (var g = 0; g < GPU_PRESETS.length; g++) {
+      var name = GPU_PRESETS[g].group;
+      if (!Object.prototype.hasOwnProperty.call(groups, name)) {
+        groups[name] = [];
+        order.push(name);
+      }
+      groups[name].push(GPU_PRESETS[g]);
+    }
+    for (var o2 = 0; o2 < order.length; o2++) {
+      var og = document.createElement('optgroup');
+      og.label = order[o2];
+      var list = groups[order[o2]];
+      for (var j = 0; j < list.length; j++) {
+        var opt = document.createElement('option');
+        opt.value = list[j].id;
+        opt.textContent = list[j].label + ' (' + list[j].gib + ' GiB)';
+        og.appendChild(opt);
+      }
+      el.gpu.appendChild(og);
+    }
+  })();
+
+  /* size chips */
+  var SIZE_CHIPS = [1, 3, 7, 8, 13, 14, 32, 70];
+  for (var s = 0; s < SIZE_CHIPS.length; s++) {
+    (function (v) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip';
+      b.textContent = v + 'B';
+      b.addEventListener('click', function () {
+        el.params.value = String(v);
+        el.preset.value = '';
+        el.presetNote.textContent = 'Parameter count set to ' + v + 'B. The architecture fields below still drive the KV cache, so check them.';
+        render();
+      });
+      el.sizeChips.appendChild(b);
+    })(SIZE_CHIPS[s]);
+  }
+
+  var CTX_CHIPS = [2048, 4096, 8192, 16384, 32768, 65536, 131072];
+  for (var c = 0; c < CTX_CHIPS.length; c++) {
+    (function (v) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip';
+      b.textContent = (v >= 1024 ? (v / 1024) + 'k' : String(v));
+      b.addEventListener('click', function () { el.ctx.value = String(v); render(); });
+      el.ctxChips.appendChild(b);
+    })(CTX_CHIPS[c]);
+  }
+
+  /* ---------- wiring ---------- */
+  el.preset.addEventListener('change', function () {
+    var p = lookupIn(MODEL_INDEX, el.preset.value);
+    if (!p) {
+      el.presetNote.textContent = 'Custom shape. Fill the architecture fields yourself.';
+      render();
+      return;
+    }
+    el.params.value = String(p.params);
+    el.layers.value = String(p.layers);
+    el.heads.value = String(p.heads);
+    el.kvheads.value = String(p.kvHeads);
+    el.headdim.value = String(p.headDim);
+    if (!el.ctx.value) { el.ctx.value = String(p.ctx); }
+    el.presetNote.textContent = p.note;
+    render();
+  });
+
+  el.quant.addEventListener('change', function () {
+    var qp = lookupIn(QUANT_INDEX, el.quant.value);
+    if (qp) {
+      if (qp.kind !== 'custom') { el.bpw.value = String(qp.bpw); }
+      el.bpwNote.textContent = qp.note;
+    }
+    render();
+  });
+
+  el.bpw.addEventListener('input', function () {
+    var qp = lookupIn(QUANT_INDEX, el.quant.value);
+    if (qp && qp.kind !== 'custom' && Number(el.bpw.value) !== qp.bpw) {
+      el.quant.value = 'custom';
+      var custom = lookupIn(QUANT_INDEX, 'custom');
+      el.bpwNote.textContent = custom ? custom.note : '';
+    }
+    render();
+  });
+
+  el.kvquant.addEventListener('change', function () {
+    var kp = lookupIn(KV_INDEX, el.kvquant.value);
+    if (kp && kp.id !== 'custom') { el.kvbits.value = String(kp.bits); }
+    render();
+  });
+
+  el.gpu.addEventListener('change', function () {
+    var gp = lookupIn(GPU_INDEX, el.gpu.value);
+    if (gp) {
+      el.myvram.value = String(roundTo(effectiveCapacityGib(gp, UNIFIED_USABLE_FRACTION), 1));
+      el.gpuNote.textContent = gp.unified
+        ? ('Set to about 75% of the ' + gp.gib + ' GB total. ' + UNIFIED_MEMORY_NOTE)
+        : 'Advertised board capacity, ' + gp.gib + ' GiB. Usable is less: the driver, the desktop and any other process take a slice. Adjust the reserved field.';
+    } else {
+      el.gpuNote.textContent = 'Everything on this page is in GiB (1024 cubed bytes), which is what nvidia-smi reports.';
+    }
+    render();
+  });
+
+  var watch = ['params', 'bpw', 'ctx', 'batch', 'kvbits', 'layers', 'heads', 'kvheads', 'headdim',
+    'actLow', 'actHigh', 'rtLow', 'rtHigh', 'myvram', 'reserved'];
+  for (var w = 0; w < watch.length; w++) {
+    el[watch[w]].addEventListener('input', render);
+  }
+
+  el.sampleBtn.addEventListener('click', function () {
+    el.preset.value = 'llama31-8b';
+    var p = lookupIn(MODEL_INDEX, 'llama31-8b');
+    el.params.value = String(p.params);
+    el.layers.value = String(p.layers);
+    el.heads.value = String(p.heads);
+    el.kvheads.value = String(p.kvHeads);
+    el.headdim.value = String(p.headDim);
+    el.presetNote.textContent = p.note;
+    el.quant.value = 'q4_k_m';
+    var qp = lookupIn(QUANT_INDEX, 'q4_k_m');
+    el.bpw.value = String(qp.bpw);
+    el.bpwNote.textContent = qp.note;
+    el.ctx.value = '65536';
+    el.batch.value = '1';
+    el.kvquant.value = 'fp16';
+    el.kvbits.value = '16';
+    el.gpu.value = 'rtx3060-12';
+    el.myvram.value = '12';
+    el.gpuNote.textContent = 'Advertised board capacity, 12 GiB. Usable is less: the driver, the desktop and any other process take a slice. Adjust the reserved field.';
+    setDefaults();
+    render();
+    announce('Sample loaded: Llama 3.1 8B at Q4_K_M, 64k context, on a 12 GiB card.');
+  });
+
+  el.resetBtn.addEventListener('click', function () {
+    el.preset.value = '';
+    el.params.value = '';
+    el.quant.value = 'q4_k_m';
+    var qp = lookupIn(QUANT_INDEX, 'q4_k_m');
+    el.bpw.value = String(qp.bpw);
+    el.bpwNote.textContent = qp.note;
+    el.ctx.value = '';
+    el.batch.value = '1';
+    el.kvquant.value = 'fp16';
+    el.kvbits.value = '16';
+    el.layers.value = '';
+    el.heads.value = '';
+    el.kvheads.value = '';
+    el.headdim.value = '';
+    el.gpu.value = '';
+    el.myvram.value = '';
+    el.presetNote.textContent = 'Presets fill parameter count and architecture. Every field stays editable.';
+    el.gpuNote.textContent = 'Everything on this page is in GiB (1024 cubed bytes), which is what nvidia-smi reports.';
+    setDefaults();
+    render();
+    announce('Reset.');
+  });
+
+  el.copyBtn.addEventListener('click', function () {
+    var text = el.summaryOut.textContent;
+    copyText(text, el.copyBtn);
+  });
+
+  function copyText(text, button) {
+    var original = button.getAttribute('data-label') || button.textContent;
+    button.setAttribute('data-label', original);
+    function done(ok) {
+      button.textContent = ok ? 'Copied' : 'Press Ctrl+C';
+      window.setTimeout(function () { button.textContent = original; }, 1600);
+    }
+    if (window.navigator && window.navigator.clipboard && window.navigator.clipboard.writeText) {
+      window.navigator.clipboard.writeText(text).then(function () { done(true); }, function () { fallback(); });
+    } else {
+      fallback();
+    }
+    function fallback() {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', 'readonly');
+        ta.style.position = 'fixed';
+        ta.style.top = '-1000px';
+        document.body.appendChild(ta);
+        ta.select();
+        var ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        done(ok);
+      } catch (e) {
+        done(false);
+      }
+    }
+  }
+
+  function announce(msg) { el.live.textContent = msg; }
+
+  function setDefaults() {
+    el.actLow.value = String(DEFAULTS.actLowPct);
+    el.actHigh.value = String(DEFAULTS.actHighPct);
+    el.rtLow.value = String(DEFAULTS.rtLowGib);
+    el.rtHigh.value = String(DEFAULTS.rtHighGib);
+    el.reserved.value = String(DEFAULTS.reservedGib);
+  }
+
+  /* ---------- read the form ---------- */
+  function readInput() {
+    return {
+      paramsBillions: parseFloat(el.params.value),
+      bitsPerWeight: parseFloat(el.bpw.value),
+      layers: parseFloat(el.layers.value),
+      heads: parseFloat(el.heads.value),
+      kvHeads: parseFloat(el.kvheads.value),
+      headDim: parseFloat(el.headdim.value),
+      contextLength: parseFloat(el.ctx.value),
+      batchSize: parseFloat(el.batch.value || '1'),
+      kvBits: parseFloat(el.kvbits.value),
+      actLowPct: parseFloat(el.actLow.value),
+      actHighPct: parseFloat(el.actHigh.value),
+      rtLowGib: parseFloat(el.rtLow.value),
+      rtHighGib: parseFloat(el.rtHigh.value)
+    };
+  }
+
+  function formIsEmpty() {
+    return !el.params.value && !el.layers.value && !el.ctx.value;
+  }
+
+  /* ---------- render ---------- */
+  function render() {
+    if (formIsEmpty()) {
+      el.results.innerHTML =
+        '<div class="empty"><div class="big">Nothing to calculate yet.</div>' +
+        '<p>Pick a model preset, or press <b>Load sample</b> to see an 8B model at 64k context on a 12 GiB card: it does not fit, and the page shows exactly what to change.</p></div>';
+      el.summaryPanel.hidden = true;
+      return;
+    }
+
+    var input = readInput();
+    var result = estimateVram(input);
+
+    if (!result.ok) {
+      var items = '';
+      for (var e = 0; e < result.errors.length; e++) {
+        items += '<li>' + escapeHtml(result.errors[e]) + '</li>';
+      }
+      el.results.innerHTML =
+        '<div class="errbox"><b>Fill these in before the numbers mean anything:</b><ul>' + items + '</ul></div>' +
+        '<div class="empty"><p>Model presets fill the architecture fields in one click.</p></div>';
+      el.summaryPanel.hidden = true;
+      return;
+    }
+
+    var capacity = parseFloat(el.myvram.value);
+    var reserved = parseFloat(el.reserved.value);
+    if (!isFinite(reserved) || reserved < 0) { reserved = 0; }
+    var hasGpu = isFinite(capacity) && capacity > 0;
+    var gpuChoice = lookupIn(GPU_INDEX, el.gpu.value);
+    var gpuLabel = gpuChoice ? gpuChoice.label : (hasGpu ? capacity + ' GiB card' : 'no card selected');
+
+    var fit = hasGpu ? checkFit(result, capacity, reserved) : null;
+    var usable = hasGpu ? fit.usableBytes : 0;
+    var offload = hasGpu ? computeOffload(result, usable) : null;
+    var maxCtx = hasGpu ? maxContextThatFits(input, usable) : null;
+
+    var html = '';
+
+    if (result.warnings.length) {
+      var wItems = '';
+      for (var wi = 0; wi < result.warnings.length; wi++) {
+        wItems += '<li>' + escapeHtml(result.warnings[wi]) + '</li>';
+      }
+      html += '<div class="warnbox"><b>Check these:</b><ul>' + wItems + '</ul></div>';
+    }
+
+    /* verdict */
+    if (fit) {
+      var cls = fit.status;
+      var headline, sub;
+      if (fit.status === 'fits') {
+        headline = 'Fits on ' + gpuLabel;
+        sub = 'Even the high end of the estimate leaves ' + roundTo(fit.headroomGib, 2).toFixed(2) +
+          ' GiB spare out of ' + roundTo(fit.usableGib, 2).toFixed(2) + ' GiB usable.';
+      } else if (fit.status === 'tight') {
+        headline = 'Borderline on ' + gpuLabel;
+        sub = 'The low estimate fits. The high estimate is over by ' +
+          roundTo(-fit.headroomGib, 2).toFixed(2) + ' GiB. Expect it to load and then fail on a long prompt or a big batch.';
+      } else {
+        headline = 'Does not fit on ' + gpuLabel;
+        sub = 'Short by at least ' + roundTo(fit.shortfallGib, 2).toFixed(2) +
+          ' GiB, using the most optimistic end of the estimate.';
+      }
+      html += '<div class="verdict ' + escapeHtml(cls) + '">' +
+        '<div class="headline">' + escapeHtml(headline) + '</div>' +
+        '<div class="sub">' + escapeHtml(sub) + '</div>' +
+        '<div class="range-line"><span class="range-num">' +
+        roundTo(result.total.lowGib, 2).toFixed(2) + ' to ' + roundTo(result.total.highGib, 2).toFixed(2) +
+        '</span><span class="range-unit">GiB estimated total, against ' +
+        roundTo(fit.usableGib, 2).toFixed(2) + ' GiB usable (' + roundTo(fit.capacityGib, 2) +
+        ' GiB board minus ' + roundTo(fit.reservedGib, 2) + ' GiB reserved)</span></div>' +
+        '</div>';
+    } else {
+      html += '<div class="verdict">' +
+        '<div class="headline">' + roundTo(result.total.lowGib, 2).toFixed(2) + ' to ' +
+        roundTo(result.total.highGib, 2).toFixed(2) + ' GiB</div>' +
+        '<div class="sub">Estimated total. Enter your VRAM or pick a card for a fits-or-not verdict.</div></div>';
+    }
+
+    /* breakdown */
+    html += '<h3>Breakdown, with the arithmetic</h3><div class="scroll-x"><table>' +
+      '<thead><tr><th>Line item</th><th class="num">GiB</th><th class="num">Confidence</th></tr></thead><tbody>';
+
+    html += '<tr><td>Model weights' +
+      '<span class="deriv">' + escapeHtml(result.weights.derivation) + '</span></td>' +
+      '<td class="num">' + fmtGib(result.weights.bytes) + '</td>' +
+      '<td class="num"><span class="tag exact">near-exact</span></td></tr>';
+
+    html += '<tr><td>KV cache' +
+      '<span class="deriv">' + escapeHtml(result.kv.derivation) + '\n' +
+      escapeHtml(result.kv.perTokenDerivation) + '\n' +
+      escapeHtml('per 1024 tokens x ' + result.inputs.batchSize + ' batch: ' +
+        fmtGib(result.kv.per1kTokensBytes * result.inputs.batchSize, 3) + ' GiB') +
+      '</span></td>' +
+      '<td class="num">' + fmtGib(result.kv.bytes) + '</td>' +
+      '<td class="num"><span class="tag exact">near-exact</span></td></tr>';
+
+    html += '<tr><td>Activation + workspace' +
+      '<span class="deriv">' + escapeHtml(result.activation.derivation) + '</span></td>' +
+      '<td class="num">' + fmtGib(result.activation.lowBytes) + ' to ' + fmtGib(result.activation.highBytes) + '</td>' +
+      '<td class="num"><span class="tag est">estimate</span></td></tr>';
+
+    html += '<tr><td>Runtime / CUDA context' +
+      '<span class="deriv">' + escapeHtml(result.runtime.derivation) + '</span></td>' +
+      '<td class="num">' + fmtGib(result.runtime.lowBytes) + ' to ' + fmtGib(result.runtime.highBytes) + '</td>' +
+      '<td class="num"><span class="tag est">estimate</span></td></tr>';
+
+    html += '<tr class="total"><td>Total' +
+      '<span class="deriv">' + escapeHtml('weights + KV = ' + fmtGib(result.exactBytes) +
+        ' GiB near-exact, plus ' + fmtGib(result.activation.lowBytes + result.runtime.lowBytes) + ' to ' +
+        fmtGib(result.activation.highBytes + result.runtime.highBytes) + ' GiB estimated overhead') +
+      '</span></td>' +
+      '<td class="num">' + roundTo(result.total.lowGib, 2).toFixed(2) + ' to ' +
+      roundTo(result.total.highGib, 2).toFixed(2) + '</td>' +
+      '<td class="num"><span class="tag est">range</span></td></tr>';
+
+    html += '</tbody></table></div>';
+
+    html += '<div class="note">The KV cache is ' + roundTo(result.kv.sharePct, 1) +
+      '% of the near-exact part at this context. ' +
+      (result.kv.sharePct > 40
+        ? 'That is cache-dominated: cutting context or quantizing the cache will buy you more than a smaller quant will.'
+        : 'That is weight-dominated: a smaller quant buys you more than cutting context will.') + '</div>';
+
+    /* what would make it fit */
+    if (fit && fit.status !== 'fits') {
+      html += '<h3>What would make it fit</h3><ul class="fixes">';
+
+      var quantOptions = quantsThatFit(input, usable, QUANT_PRESETS);
+      var bestQuant = null;
+      for (var qi = 0; qi < quantOptions.length; qi++) {
+        if (quantOptions[qi].fits) { bestQuant = quantOptions[qi]; break; }
+      }
+      if (bestQuant) {
+        html += '<li><b>Drop to ' + escapeHtml(bestQuant.label) + '</b> (' + bestQuant.bpw +
+          ' bits per weight' + (bestQuant.kind === 'approx' ? ', approximate' : '') +
+          '). Estimated total becomes ' + roundTo(bestQuant.lowGib, 2).toFixed(2) + ' to ' +
+          roundTo(bestQuant.highGib, 2).toFixed(2) + ' GiB, which fits. That is the largest bits-per-weight option in the list that fits, so it is the least lossy of the ones that do.</li>';
+      } else {
+        var smallest = quantOptions.length ? quantOptions[quantOptions.length - 1] : null;
+        var kvDominates = result.kv.bytes > usable * 0.5;
+        html += '<li><b>No weight quantization in the list fits</b> at this context and batch' +
+          (smallest ? ', not even ' + escapeHtml(smallest.label) + ' at ' + smallest.bpw + ' bits' : '') + '. ' +
+          (kvDominates
+            ? 'The KV cache alone is ' + fmtGib(result.kv.bytes) + ' GiB against ' +
+              roundTo(fit.usableGib, 2).toFixed(2) + ' GiB usable, so shrinking the weights cannot close the gap on its own. Cut context, quantize the cache, or cut batch.'
+            : 'The weights are what is too big here, so cutting context will not rescue it either. Use a smaller model, or split it across more than one GPU.') +
+          '</li>';
+      }
+
+      if (maxCtx && maxCtx.ok && maxCtx.tokens > 0) {
+        html += '<li><b>Cut context to about ' + groupDigits(maxCtx.tokens) + ' tokens</b> at the current quantization.' +
+          '<span class="deriv">' + escapeHtml(maxCtx.derivation) + '</span></li>';
+      } else if (maxCtx && maxCtx.ok) {
+        html += maxCtx.weightsAloneFit
+          ? '<li><b>Cutting context will not save this.</b> The weights and overhead alone leave room for less than a single token of KV cache at this quantization.</li>'
+          : '<li><b>Cutting context will not save this.</b> The weights alone plus overhead already exceed usable VRAM, so no context length fits at this quantization.</li>';
+      }
+
+      if (input.kvBits > 8) {
+        var saving = kvQuantSaving(input, 8);
+        if (saving && saving.savedGib > 0.01) {
+          html += '<li><b>Quantize the KV cache to 8 bits</b> and save about ' +
+            roundTo(saving.savedGib, 2).toFixed(2) + ' GiB, bringing the high estimate to ' +
+            roundTo(saving.newHighGib, 2).toFixed(2) + ' GiB. In llama.cpp that is <code>-ctk q8_0 -ctv q8_0</code>. Quality cost at 8 bits is small.</li>';
+        }
+      }
+
+      if (input.batchSize > 1) {
+        html += '<li><b>Drop batch size to 1</b> and the KV cache falls by a factor of ' +
+          input.batchSize + ', from ' + fmtGib(result.kv.bytes) + ' to ' +
+          fmtGib(result.kv.bytes / input.batchSize) + ' GiB.</li>';
+      }
+
+      if (offload && offload.layersOnGpu > 0 && offload.layersOnGpu < offload.totalLayers) {
+        html += '<li><b>Offload only ' + offload.layersOnGpu + ' of ' + offload.totalLayers +
+          ' layers to the GPU</b> and let the rest run on the CPU (in llama.cpp, <code>-ngl ' +
+          offload.layersOnGpu + '</code>). It will run. It will be dramatically slower.</li>';
+      }
+      html += '</ul>';
+    }
+
+    /* partial offload */
+    if (offload) {
+      html += '<h3>Partial offload</h3>';
+      if (offload.fullyOffloaded) {
+        html += '<p style="font-size:0.88rem;color:var(--ink-soft)">All ' + offload.totalLayers +
+          ' layers fit on the GPU. Nothing needs to spill to system RAM.</p>';
+      } else {
+        html += '<p style="font-size:0.88rem;color:var(--ink-soft)">About <b>' + offload.layersOnGpu +
+          ' of ' + offload.totalLayers + ' layers</b> fit on the GPU. The other ' + offload.layersOnCpu +
+          ' would run on the CPU, using roughly ' + fmtGib(offload.cpuBytes) + ' GiB of system RAM.</p>' +
+          '<span class="deriv">' + escapeHtml(offload.derivation) + '</span>' +
+          '<div class="note">Approximate. Per-layer cost here is (weights + KV) divided by layer count, but the token embedding, output head and final norm are not per-layer, so the true split shifts by a layer or two. Once any layer runs on the CPU, generation speed drops a long way, and how far depends on your CPU, memory bandwidth and how many layers spilled. This tool does not predict tokens per second.</div>';
+      }
+    }
+
+    /* fits table */
+    html += '<h3>Against common GPUs</h3><div class="scroll-x"><table>' +
+      '<thead><tr><th>Card</th><th class="num">Total GiB</th><th class="num">Usable</th>' +
+      '<th class="num">Headroom</th><th>Verdict</th></tr></thead><tbody>';
+    var anyUnified = false;
+    for (var gi = 0; gi < GPU_PRESETS.length; gi++) {
+      var gpu = GPU_PRESETS[gi];
+      var f = checkFit(result, effectiveCapacityGib(gpu, UNIFIED_USABLE_FRACTION), reserved);
+      var pill = f.status === 'fits' ? '<span class="pill fits">fits</span>'
+        : (f.status === 'tight' ? '<span class="pill tight">borderline</span>' : '<span class="pill no">no</span>');
+      var margin = f.status === 'no'
+        ? '-' + roundTo(f.shortfallGib, 2).toFixed(2)
+        : roundTo(f.headroomGib, 2).toFixed(2);
+      if (gpu.unified) { anyUnified = true; }
+      html += '<tr><td>' + escapeHtml(gpu.label) + (gpu.unified ? ' <span class="tag">unified</span>' : '') + '</td>' +
+        '<td class="num">' + gpu.gib + '</td>' +
+        '<td class="num">' + roundTo(f.usableGib, 1).toFixed(1) + '</td>' +
+        '<td class="num">' + margin + '</td>' +
+        '<td>' + pill + '</td></tr>';
+    }
+    html += '</tbody></table></div>';
+    html += '<div class="note">Totals are the advertised board capacities and every one of them is editable through the My VRAM field. "Usable" subtracts the reserved figure you set (' +
+      roundTo(reserved, 2) + ' GiB), and for Apple rows it also applies the approximate 0.75 unified-memory factor described below. Headroom is measured against the high end of the estimate, so a small positive number still means borderline in practice.</div>';
+    if (anyUnified) {
+      html += '<div class="note">' + escapeHtml(UNIFIED_MEMORY_NOTE) + '</div>';
+    }
+
+    el.results.innerHTML = html;
+
+    /* summary */
+    el.summaryOut.textContent = buildSummary(result, fit, gpuLabel, offload, maxCtx);
+    el.summaryPanel.hidden = false;
+  }
+
+  /* ---------- boot ---------- */
+  (function init() {
+    setDefaults();
+    el.batch.value = String(DEFAULTS.batchSize);
+    el.quant.value = 'q4_k_m';
+    var qp = lookupIn(QUANT_INDEX, 'q4_k_m');
+    el.bpw.value = String(qp.bpw);
+    el.bpwNote.textContent = qp.note;
+    el.kvquant.value = 'fp16';
+    el.kvbits.value = '16';
+    render();
+  })();
+})();
+</script>
+</body>
+</html>
