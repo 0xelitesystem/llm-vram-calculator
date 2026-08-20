@@ -224,6 +224,43 @@ footer.bottom {
   h1 { font-size: 1.25rem; }
 }
 </style>
+<style>
+/* elitesystem brand tokens: chrome only, meaning preserved */
+:root, :root[data-theme="dark"] {
+  --bg: #0a0a0a;
+  --code-bg: #111110;
+  --err: #ff6450;
+  --gold: #ffb454;
+  --ink: #e8e8e3;
+  --ink-faint: #6e6e68;
+  --ink-soft: #a8a8a3;
+  --ok: #7ddc7d;
+  --rule: #1f1f1d;
+  --surface: #111110;
+  --surface-2: #161614;
+  --teal: #d4ff3a;
+  --teal-deep: #ffb454;
+  --warn: #ffb454;
+}
+:root[data-theme="light"] {
+  --bg: #e8ebef;
+  --code-bg: #dee2e8;
+  --err: #b8341a;
+  --gold: #a05a00;
+  --ink: #0a0a0a;
+  --ink-faint: #6e6e68;
+  --ink-soft: #2a2a27;
+  --ok: #1a5c2e;
+  --rule: #c8cdd5;
+  --surface: #dee2e8;
+  --surface-2: #d3d7df;
+  --teal: #2d6b00;
+  --teal-deep: #a05a00;
+  --warn: #a05a00;
+}
+:root { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
+</style>
 </head>
 <body>
 <script>
