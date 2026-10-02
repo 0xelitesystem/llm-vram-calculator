@@ -2,9 +2,18 @@
 
 Estimate the GPU memory a local LLM needs, with the arithmetic shown, an honest range instead of a fake-precise number, and a fits-or-not verdict for common GPUs.
 
-## Live demo
+**Live demo:** https://0xelitesystem.github.io/llm-vram-calculator/
 
-https://0xelitesystem.github.io/llm-vram-calculator/
+## Use
+
+1. Pick a model preset, or enter the parameter count and the architecture (layers, attention heads, key/value heads, head dimension) from the model's `config.json`.
+2. Choose the weight quantization and KV cache precision, then set context length and batch size.
+3. Pick your GPU, or type your VRAM in **My VRAM (GiB)**.
+4. Read the estimate range, the fits-or-not verdict and the suggested fixes, then press **Copy summary**.
+
+## Why this exists
+
+A VRAM estimate that computes the KV cache from attention heads instead of key/value heads overstates grouped-query models by the group size, and one that prints a single number hides how much of it is guesswork. This calculator shows every term with its arithmetic and gives a range. It is one HTML file that runs in your browser, with no tracking and no server, under the MIT license.
 
 ## Features
 
@@ -41,6 +50,19 @@ Companion reference, if the question behind the question is whether to self-host
 ## Privacy
 
 Everything runs in your browser. Nothing is uploaded, there is no analytics, no tracking and no network request of any kind. The page is a single HTML file with no external dependencies. Open it from disk with the network cable unplugged and it works exactly the same. The only thing stored is your light/dark preference, in localStorage on your own machine.
+
+## Run locally
+
+```bash
+git clone https://github.com/0xelitesystem/llm-vram-calculator
+cd llm-vram-calculator
+```
+
+Open `index.html` in any modern browser. Or serve the folder with `python -m http.server 8000` and visit http://localhost:8000/.
+
+## Build
+
+No build step. The whole tool is one `index.html` file with its CSS and JavaScript inline, and nothing to install.
 
 ## License
 
